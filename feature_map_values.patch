@@ -1,9 +1,85 @@
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..678d570
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,11 @@
++FROM public.ecr.aws/x8v8d7g8/mars-base:latest
++
++WORKDIR /app
++
++# Copy repository source
++COPY . /app/
++
++# Install project dependencies and test tools
++RUN pip install -e ".[all]" pytest pytest-cov
++
++CMD ["bash"]
+\ No newline at end of file
+diff --git a/problem_description.md b/problem_description.md
+new file mode 100644
+index 0000000..2f7aa2a
+--- /dev/null
++++ b/problem_description.md
+@@ -0,0 +1,51 @@
++# Add `map_values` Utility Method to python-benedict
++
++## Repository
++- **URL**: https://github.com/fabiocaccamo/python-benedict
++- **Commit**: e3947e59ea898183a541434ed3cecf665a56cba9
++- **Language**: Python
++- **Category**: feature_request
++- **Difficulty**: medium
++
++## Goal
++
++Add a new utility method `map_values` to the `benedict` dict class that applies a transformation function to all **top-level** values in the dictionary and returns a new `benedict` instance with the transformed values.
++
++The library currently provides `filter` (select items by predicate) but has no method to transform/map values using a callback. This is a natural and commonly needed companion to `filter`.
++
++## Architecture and Interface
++
++### Core Free Function (`benedict/core/map_values.py`)
++
++`benedict.core.map_values` must be a **free function** importable via:
++
++```python
++from benedict.core import map_values
++```
++
++It takes two positional arguments `(mapping, transformer)`:
++- `mapping`: a dict-like object (the source dictionary).
++- `transformer`: a callable that receives `(key, value)` and returns the new value.
++
++It must:
++- Return a **new plain `dict`** with the transformed values.
++- Raise `ValueError` if `transformer` is not callable.
++- Apply the transformation to **top-level values only** — nested dicts and lists within values are passed as-is to the transformer, not iterated into.
++- Not mutate the input `mapping`.
++- Be listed in the `__all__` export of `benedict/core/__init__.py`.
++
++### Class Method (`benedict.map_values`)
++
++The `benedict` class must expose `map_values(self, transformer)` that:
++- Calls the core free function internally.
++- Returns a **new instance** of the **exact same type** as `self` (preserving subclass identity).
++- Raises `ValueError` if `transformer` is not callable.
++- Does not mutate the original instance.
++
++## Validation
++
++- `./test.sh base` must pass all existing repository tests.
++- `./test.sh new` must fail before implementation and pass after correct implementation.
++- The returned value from the class method must be a new instance, not the same object.
++- The core free function must return a plain `dict`, not a `benedict`.
++- `"map_values"` must appear in `benedict.core.__all__`.
+\ No newline at end of file
 diff --git a/test.sh b/test.sh
 new file mode 100755
-index 0000000..a3c3e4e
+index 0000000..c763748
 --- /dev/null
 +++ b/test.sh
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,11 @@
 +#!/bin/bash
 +set -e
 +
@@ -17,10 +93,10 @@ index 0000000..a3c3e4e
 +fi
 diff --git a/tests/test_map_values.py b/tests/test_map_values.py
 new file mode 100644
-index 0000000..b5d7f8a
+index 0000000..9c9036e
 --- /dev/null
 +++ b/tests/test_map_values.py
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,190 @@
 +import unittest
 +
 +from benedict import benedict
@@ -85,7 +161,7 @@ index 0000000..b5d7f8a
 +        expected = {"a": "int", "b": "str", "c": "NoneType", "d": "list", "e": "dict"}
 +        self.assertEqual(result, expected)
 +
-+    def test_map_values_raises_on_non_callable(self):
++    def test_map_values_raises_on_non_callable_string(self):
 +        """map_values must raise ValueError if argument is not callable."""
 +        d = benedict({"a": 1})
 +        with self.assertRaises(ValueError):
@@ -102,6 +178,12 @@ index 0000000..b5d7f8a
 +        d = benedict({"a": 1})
 +        with self.assertRaises(ValueError):
 +            d.map_values(True)
++
++    def test_map_values_raises_on_int_argument(self):
++        """map_values must raise ValueError if argument is an int."""
++        d = benedict({"a": 1})
++        with self.assertRaises(ValueError):
++            d.map_values(42)
 +
 +    def test_map_values_single_item(self):
 +        """map_values should work with a single-item dict."""
@@ -122,6 +204,36 @@ index 0000000..b5d7f8a
 +        expected = {"first": "HELLO", "second": "WORLD"}
 +        self.assertEqual(result, expected)
 +
++    def test_map_values_no_recursion_into_nested_dicts(self):
++        """map_values should not recursively transform nested dicts or lists."""
++        d = benedict({"a": 5, "b": {"inner_a": 10, "inner_b": 20}, "c": [100, 200, 300]})
++        result = d.map_values(lambda k, v: v * 2 if isinstance(v, int) else v)
++        expected = {"a": 10, "b": {"inner_a": 10, "inner_b": 20}, "c": [100, 200, 300]}
++        self.assertEqual(result, expected)
++
++    def test_map_values_nested_values_passed_as_whole_object(self):
++        """Transformer should receive nested dicts/lists as whole objects, not recursively."""
++        d = benedict({"a": {"inner": 1}, "b": [1, 2, 3]})
++        calls = []
++        
++        def capture_calls(k, v):
++            calls.append((k, v))
++            return v
++        
++        d.map_values(capture_calls)
++        self.assertEqual(len(calls), 2)
++        self.assertEqual(calls[0], ("a", {"inner": 1}))
++        self.assertEqual(calls[1], ("b", [1, 2, 3]))
++
++    def test_map_values_preserves_subclass_type(self):
++        """map_values should return an instance of the same subclass."""
++        class MyBenedict(benedict):
++            pass
++        
++        d = MyBenedict({"a": 1, "b": 2})
++        result = d.map_values(lambda k, v: v * 2)
++        self.assertEqual(type(result), MyBenedict)
++
 +
 +class TestMapValuesCoreFunction(unittest.TestCase):
 +    """Tests for the map_values core function import."""
@@ -131,13 +243,18 @@ index 0000000..b5d7f8a
 +        from benedict.core import map_values
 +        self.assertTrue(callable(map_values))
 +
-+    def test_map_values_core_function_works_on_plain_dict(self):
-+        """The core map_values function should work on a plain dict."""
++    def test_map_values_in_core_all(self):
++        """map_values should be in benedict.core.__all__."""
++        import benedict.core
++        self.assertIn("map_values", benedict.core.__all__)
++
++    def test_map_values_core_returns_plain_dict(self):
++        """The core function should return a plain dict, not a benedict."""
 +        from benedict.core import map_values
 +        d = {"a": 1, "b": 2}
-+        result = map_values(d, lambda k, v: v + 10)
-+        expected = {"a": 11, "b": 12}
-+        self.assertEqual(result, expected)
++        result = map_values(d, lambda k, v: v * 2)
++        self.assertEqual(type(result), dict)
++        self.assertNotEqual(type(result), benedict)
 +
 +    def test_map_values_core_function_raises_on_non_callable(self):
 +        """The core function should raise ValueError for non-callable."""
@@ -145,6 +262,29 @@ index 0000000..b5d7f8a
 +        with self.assertRaises(ValueError):
 +            map_values({"a": 1}, 123)
 +
++    def test_map_values_core_raises_on_none(self):
++        """The core function should raise ValueError for None."""
++        from benedict.core import map_values
++        with self.assertRaises(ValueError):
++            map_values({"a": 1}, None)
++
++    def test_map_values_core_no_recursion(self):
++        """The core function should not recursively transform nested values."""
++        from benedict.core import map_values
++        d = {"a": 5, "b": {"nested": 10}}
++        result = map_values(d, lambda k, v: v * 3 if isinstance(v, int) else v)
++        expected = {"a": 15, "b": {"nested": 10}}
++        self.assertEqual(result, expected)
++
++    def test_map_values_core_does_not_mutate_input(self):
++        """The core function should not mutate the input dict."""
++        from benedict.core import map_values
++        d = {"a": 1, "b": 2}
++        original = d.copy()
++        _ = map_values(d, lambda k, v: v * 10)
++        self.assertEqual(d, original)
++
 +
 +if __name__ == "__main__":
 +    unittest.main()
+\ No newline at end of file
