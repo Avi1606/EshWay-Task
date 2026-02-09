@@ -9,57 +9,43 @@
 
 ## Goal
 
-Add a new utility method `map_values` to the `benedict` dict class that applies a
-transformation function to all values in the dictionary and returns a new `benedict`
-instance with the transformed values.
+Add a new utility method `map_values` to the `benedict` dict class that applies a transformation function to all **top-level** values in the dictionary and returns a new `benedict` instance with the transformed values.
 
-The library currently provides `filter` (select items by predicate) but has no method
-to transform/map values using a callback. This is a natural and commonly needed
-companion to `filter`.
+The library currently provides `filter` (select items by predicate) but has no method to transform/map values using a callback. This is a natural and commonly needed companion to `filter`.
 
-## Behavioral Requirements
+## Architecture and Interface
 
-1. The `benedict` class must expose a new method called `map_values`.
+### Core Free Function (`benedict/core/map_values.py`)
 
-2. `map_values` must accept a single argument: a callable (function) that receives
-   two arguments (key, value) and returns the new value.
+`benedict.core.map_values` must be a **free function** importable via:
 
-3. `map_values` must return a NEW `benedict` instance (not modify in-place).
-   The original dict must remain unchanged.
+```python
+from benedict.core import map_values
+```
 
-4. The returned instance must be of the same type as the original (i.e., if a
-   subclass of `benedict` calls `map_values`, the result should also be that subclass).
+It takes two positional arguments `(mapping, transformer)`:
+- `mapping`: a dict-like object (the source dictionary).
+- `transformer`: a callable that receives `(key, value)` and returns the new value.
 
-5. If the callable argument is not callable, a `ValueError` must be raised with
-   a meaningful error message.
+It must:
+- Return a **new plain `dict`** with the transformed values.
+- Raise `ValueError` if `transformer` is not callable.
+- Apply the transformation to **top-level values only** — nested dicts and lists within values are passed as-is to the transformer, not iterated into.
+- Not mutate the input `mapping`.
+- Be listed in the `__all__` export of `benedict/core/__init__.py`.
 
-6. The method must work correctly with:
-   - Empty dicts (returns empty benedict)
-   - Dicts with mixed value types (int, str, None, nested dicts, lists)
-   - String keys
-   - Numeric values that get transformed (e.g., doubling integers)
-   - Values transformed to a different type (e.g., int to str)
-   - Values transformed to None
+### Class Method (`benedict.map_values`)
 
-7. The transformation must be applied only to top-level values (not recursively
-   into nested dicts). This is consistent with how `filter` works.
-
-8. The core logic must live in a dedicated module under `benedict/core/` following
-   the existing pattern of one-function-per-file.
-
-9. The method must be importable from `benedict.core`.
-
-## Edge Cases
-
-- Passing a non-callable raises `ValueError`.
-- Empty dict input returns an empty `benedict`.
-- Transformation function that returns None for all values produces a dict with
-  all None values (keys preserved).
-- Original dict is never mutated.
-- The returned dict is a `benedict` instance.
+The `benedict` class must expose `map_values(self, transformer)` that:
+- Calls the core free function internally.
+- Returns a **new instance** of the **exact same type** as `self` (preserving subclass identity).
+- Raises `ValueError` if `transformer` is not callable.
+- Does not mutate the original instance.
 
 ## Validation
 
-- All existing repository tests must continue to pass.
-- The new feature must be accessible as `d.map_values(func)` on any `benedict` instance.
-- The returned value must be a new `benedict` instance, not the same object.
+- `./test.sh base` must pass all existing repository tests.
+- `./test.sh new` must fail before implementation and pass after correct implementation.
+- The returned value from the class method must be a new instance, not the same object.
+- The core free function must return a plain `dict`, not a `benedict`.
+- `"map_values"` must appear in `benedict.core.__all__`.

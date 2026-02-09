@@ -62,7 +62,7 @@ class TestMapValuesMethod(unittest.TestCase):
         expected = {"a": "int", "b": "str", "c": "NoneType", "d": "list", "e": "dict"}
         self.assertEqual(result, expected)
 
-    def test_map_values_raises_on_non_callable(self):
+    def test_map_values_raises_on_non_callable_string(self):
         """map_values must raise ValueError if argument is not callable."""
         d = benedict({"a": 1})
         with self.assertRaises(ValueError):
@@ -79,6 +79,12 @@ class TestMapValuesMethod(unittest.TestCase):
         d = benedict({"a": 1})
         with self.assertRaises(ValueError):
             d.map_values(True)
+
+    def test_map_values_raises_on_int_argument(self):
+        """map_values must raise ValueError if argument is an int."""
+        d = benedict({"a": 1})
+        with self.assertRaises(ValueError):
+            d.map_values(42)
 
     def test_map_values_single_item(self):
         """map_values should work with a single-item dict."""
@@ -99,6 +105,36 @@ class TestMapValuesMethod(unittest.TestCase):
         expected = {"first": "HELLO", "second": "WORLD"}
         self.assertEqual(result, expected)
 
+    def test_map_values_no_recursion_into_nested_dicts(self):
+        """map_values should not recursively transform nested dicts or lists."""
+        d = benedict({"a": 5, "b": {"inner_a": 10, "inner_b": 20}, "c": [100, 200, 300]})
+        result = d.map_values(lambda k, v: v * 2 if isinstance(v, int) else v)
+        expected = {"a": 10, "b": {"inner_a": 10, "inner_b": 20}, "c": [100, 200, 300]}
+        self.assertEqual(result, expected)
+
+    def test_map_values_nested_values_passed_as_whole_object(self):
+        """Transformer should receive nested dicts/lists as whole objects, not recursively."""
+        d = benedict({"a": {"inner": 1}, "b": [1, 2, 3]})
+        calls = []
+        
+        def capture_calls(k, v):
+            calls.append((k, v))
+            return v
+        
+        d.map_values(capture_calls)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], ("a", {"inner": 1}))
+        self.assertEqual(calls[1], ("b", [1, 2, 3]))
+
+    def test_map_values_preserves_subclass_type(self):
+        """map_values should return an instance of the same subclass."""
+        class MyBenedict(benedict):
+            pass
+        
+        d = MyBenedict({"a": 1, "b": 2})
+        result = d.map_values(lambda k, v: v * 2)
+        self.assertEqual(type(result), MyBenedict)
+
 
 class TestMapValuesCoreFunction(unittest.TestCase):
     """Tests for the map_values core function import."""
@@ -108,19 +144,46 @@ class TestMapValuesCoreFunction(unittest.TestCase):
         from benedict.core import map_values
         self.assertTrue(callable(map_values))
 
-    def test_map_values_core_function_works_on_plain_dict(self):
-        """The core map_values function should work on a plain dict."""
+    def test_map_values_in_core_all(self):
+        """map_values should be in benedict.core.__all__."""
+        import benedict.core
+        self.assertIn("map_values", benedict.core.__all__)
+
+    def test_map_values_core_returns_plain_dict(self):
+        """The core function should return a plain dict, not a benedict."""
         from benedict.core import map_values
         d = {"a": 1, "b": 2}
-        result = map_values(d, lambda k, v: v + 10)
-        expected = {"a": 11, "b": 12}
-        self.assertEqual(result, expected)
+        result = map_values(d, lambda k, v: v * 2)
+        self.assertEqual(type(result), dict)
+        self.assertNotEqual(type(result), benedict)
 
     def test_map_values_core_function_raises_on_non_callable(self):
         """The core function should raise ValueError for non-callable."""
         from benedict.core import map_values
         with self.assertRaises(ValueError):
             map_values({"a": 1}, 123)
+
+    def test_map_values_core_raises_on_none(self):
+        """The core function should raise ValueError for None."""
+        from benedict.core import map_values
+        with self.assertRaises(ValueError):
+            map_values({"a": 1}, None)
+
+    def test_map_values_core_no_recursion(self):
+        """The core function should not recursively transform nested values."""
+        from benedict.core import map_values
+        d = {"a": 5, "b": {"nested": 10}}
+        result = map_values(d, lambda k, v: v * 3 if isinstance(v, int) else v)
+        expected = {"a": 15, "b": {"nested": 10}}
+        self.assertEqual(result, expected)
+
+    def test_map_values_core_does_not_mutate_input(self):
+        """The core function should not mutate the input dict."""
+        from benedict.core import map_values
+        d = {"a": 1, "b": 2}
+        original = d.copy()
+        _ = map_values(d, lambda k, v: v * 10)
+        self.assertEqual(d, original)
 
 
 if __name__ == "__main__":
